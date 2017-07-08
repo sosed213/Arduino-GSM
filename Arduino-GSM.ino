@@ -752,7 +752,7 @@ int SerialEvents1 (boolean ForceEvents=false){
 
 
 
-        if (GetAlgoritmSteps[0]>0){
+        if ((ModemPowerON==true) && (GetAlgoritmSteps[0]>0)){
         //if (TekSteps!=""){
 
             GetAlgoritmSteps[1]++;
@@ -1251,37 +1251,43 @@ int SerialEvents1 (boolean ForceEvents=false){
     }
 
     void GetDateTime(){
-        if ((TekSteps=="GetDateTime") || (TekSteps=="")){
-            if (millis() >= TimerDateTime) {
-                TekSteps="GetDateTime";
-                TimerDateTime = millis()+IntervalGetDateTime;
-
-                GetAlgoritmSteps[0]=1; // Этапы
-                GetAlgoritmSteps[1]=0; // Колличество попыток получить ответ, в пределах одного таймаута сбрасывается в 0 при каждом таймауте
+        if (ModemPowerON==true){
+            if ((TekSteps=="GetDateTime") || (TekSteps=="")){
+                if (millis() >= TimerDateTime) {
+                    TekSteps="GetDateTime";
+                    TimerDateTime = millis()+IntervalGetDateTime;
+    
+                    GetAlgoritmSteps[0]=1; // Этапы
+                    GetAlgoritmSteps[1]=0; // Колличество попыток получить ответ, в пределах одного таймаута сбрасывается в 0 при каждом таймауте
+                }
             }
         }
         BeginAlgoritmSerial();
     }
 
     void GetModemStatus(){
-        if ((TekSteps=="GetModemStatus") || (TekSteps=="")){
-            if (millis() >= TimerModemStatus) {
-                TekSteps="GetModemStatus";
-
-                // Информация о состояние модуля
-                // 0 – готов к работе
-                // 2 – неизвестно
-                // 3 – входящий звонок
-                // 4 – голосовое соединение
-                
-                ModemStatus = 2;
-                
-                TimerModemStatus = millis()+IntervalGetModemStatus;
-
-                GetAlgoritmSteps[0]=1; // Этапы. Запустит конвеер с самого начала.
-                GetAlgoritmSteps[1]=0; // Колличество попыток получить ответ, в пределах одного таймаута сбрасывается в 0 при каждом таймауте
+        if (ModemPowerON==true){
+            if ((TekSteps=="GetModemStatus") || (TekSteps=="")){
+                if (millis() >= TimerModemStatus) {
+                    TekSteps="GetModemStatus";
+    
+                    // Информация о состояние модуля
+                    // 0 – готов к работе
+                    // 2 – неизвестно
+                    // 3 – входящий звонок
+                    // 4 – голосовое соединение
+                    // 5 - Выключен
+                    
+                    ModemStatus = 2;
+                    
+                    TimerModemStatus = millis()+IntervalGetModemStatus;
+    
+                    GetAlgoritmSteps[0]=1; // Этапы. Запустит конвеер с самого начала.
+                    GetAlgoritmSteps[1]=0; // Колличество попыток получить ответ, в пределах одного таймаута сбрасывается в 0 при каждом таймауте
+                }
             }
         }
+        
         BeginAlgoritmSerial();
     }
 
@@ -1335,22 +1341,24 @@ int SerialEvents1 (boolean ForceEvents=false){
       
    
   
-            //lcd.setCursor(0, 1);
-            //lcd.print ("                ");
-            lcd.setCursor(0, 1);
-            
-            if (TekSteps==""){
-                lcd.print (DateTime);
-                lcd.print ("                ");
-            } else {
-                lcd.print ("                ");
+            if (ModemPowerON==true){
                 lcd.setCursor(0, 1);
-                
-                if (D13_Read==HIGH){
-                  lcd.print (TekSteps);
-                  lcd.print ("                ");
+    
+                if (TekSteps==""){
+                    lcd.print (DateTime);
+                    lcd.print ("                ");
+                } else {
+                    lcd.print ("                ");
+                    lcd.setCursor(0, 1);
+                    
+                    if (D13_Read==HIGH){
+                      lcd.print (TekSteps);
+                      lcd.print ("                ");
+                    }
                 }
             }
+
+            
 
             if (TekSteps=="timeout"){
                 TekSteps="";
@@ -1366,8 +1374,25 @@ int SerialEvents1 (boolean ForceEvents=false){
 
         if (D6_Read==1){
           ModemPowerON=true;
+          ModemPowerStatus=1;
         } else {
           ModemPowerON=false;
+          ModemStatus = 5;
+          TekSteps="";
+          //ResetAlgoritmSteps(false); // Завершить дальнейшие такты
+          GetAlgoritmSteps[0]=0; // Этапы. Выключить конвеер.
+          GetAlgoritmSteps[1]=0; // Колличество попыток получить ответ, в пределах одного таймаута сбрасывается в 0 при каждом таймауте
+          
+          if (ModemPowerStatus!=-1){
+              lcd.setCursor(0, 1);
+              lcd.print ("Modem PowerOff  ");
+
+              Serial.println("Modem PowerOff;");
+          }
+
+          ModemPowerStatus=-1;
+
+          
         }
   
         lcd.setCursor(7, 0);
