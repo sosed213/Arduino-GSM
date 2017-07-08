@@ -39,32 +39,31 @@ DHT dht(DHTPIN, DHTTYPE);
   float Balance=0.0;
   float LastBalance=0.0;
 
+
+// Таймеры
   unsigned long TimerBalance = 10000;             // Первый, стартовый толчек (отсчет) такта
   unsigned long TimerEverySecond = 1000;
   unsigned long TimerTemperature = 1000;
   unsigned long TimerDateTime = 10000;
   unsigned long TimerModemStatus = 500;
-
-
+  unsigned long TimerLifeUpTime = 0;
   unsigned long TimerDHT22 = 500;
+  unsigned long TimerModemPower=0;
 
+// Интервалы
+  unsigned long IntervalGetBalance = 60000;       // Интервал запроса баланса
+  unsigned long IntervalGetTemperature  = 30000;  // Интервал запроса температуры
+  unsigned long IntervalGetDateTime=900;          // Интервал запроса Даты и Время
+  unsigned long IntervalGetModemStatus=500;       // Интервал запроса статуса модема
+  unsigned long IntervalLifeUpTime=300;           // Интервал жизни Arduino
+  unsigned long IntervalDHT22=30000;              // Интервал опроса датчика DHT22
+  unsigned long IntervalModemPower=100;
   
+// Таймауты
   unsigned long TimeOutGetAlgoritm=0;             // Предельное время выполнения такта
   unsigned long TimeOutGetBalance=0;
   unsigned long TimeOutGetDateTime=0;
   unsigned long TimeOutGetModemStatus=0;
-
-
-
-  unsigned long IntervalGetBalance = 60000;       // Интервал запроса баланса
-  unsigned long IntervalGetTemperature  = 30000;  // Интервал запроса температуры
-  unsigned long IntervalGetDateTime=900;         // Интервал запроса Даты и Время
-  unsigned long IntervalGetModemStatus=500;       // Интервал запроса статуса модема
-
-  unsigned long IntervalDHT22=30000;       // Интервал запроса статуса модема
-
-
-
 
   
   
@@ -79,10 +78,21 @@ DHT dht(DHTPIN, DHTTYPE);
   String WaintSerialAlternativeResult1 = "";
   String WaintSerialResult2 = "";
   String WaintSerialResult3 = "";
+
+  String ReturnOKResult = "";
   
   String DateTime = "";
   int ModemStatus = 2;
+        // Информация о состояние модуля
+        // 0 – готов к работе
+        // 2 – неизвестно
+        // 3 – входящий звонок
+        // 4 – голосовое соединение
+  int ModemPowerStatus = 0;
+  boolean ModemPowerON = false;
 
+
+                
   
   String BufferCommandToSerial1="";
 
@@ -123,11 +133,6 @@ DHT dht(DHTPIN, DHTTYPE);
   char vTimeHH[3]={'0', '0', '\0'};
   char vTimeMM[3]={'0', '0', '\0'};
   char vTimeSS[3]={'0', '0', '\0'};
-
-  unsigned long blinkLifeUpTime = 0; // индикатор жизни Arduino
-  unsigned long Last5Sec = 0; // Счетчик последних 5 секунд
-
-  unsigned long TimerGSM=3000;
 
 
   boolean EnableSerialEvents0=true;
@@ -648,15 +653,19 @@ int SerialEvents1 (boolean ForceEvents=false){
     boolean GetLetsOK(){
         boolean ReturnOK=false;
 
+// ReturnOKResult показывает только WaintSerialResult1 или WaintSerialAlternativeResult1, обычно это OK или ERROR
+
         if (ReadSerialData()==true){
             //delay(20);
             // Проверяем на наличие OK или альтернативы - ERROR
             if (input.indexOf(WaintSerialResult1)>0){
                 ReturnOK=true;
+                ReturnOKResult=WaintSerialResult1;
             } else {
               if (WaintSerialAlternativeResult1.length()>0){
                 if (input.indexOf(WaintSerialAlternativeResult1)>0){
                   ReturnOK=true;
+                  ReturnOKResult=WaintSerialAlternativeResult1;
                 }
               }
             }
@@ -753,19 +762,11 @@ int SerialEvents1 (boolean ForceEvents=false){
             // Настройки на первом шаге
             if (GetAlgoritmSteps[1]==1){
 
-/*
+
                 if (LastSteps==TekSteps){
                     GetAlgoritmSteps[2]--;
-                    if (GetAlgoritmSteps[2]<=0){
-
-                        GetAlgoritmSteps[2]=MaxGetAlgoritmSteps;
-                        LastSteps="";                  
-                        
-                        ResetAlgoritmSteps(false); // Завершить дальнейшие такты
-                    }
-                  
                 }
-*/
+
 
                 // Общие настройки
                 SerialEvents1(true);
@@ -782,6 +783,12 @@ int SerialEvents1 (boolean ForceEvents=false){
                 GetAlgoritmSteps[2]=MaxGetAlgoritmSteps;
                 LastSteps=TekSteps;
             }
+
+            if (GetAlgoritmSteps[2]<=0){
+                GetAlgoritmSteps[2]=MaxGetAlgoritmSteps;
+                LastSteps="";                  
+                ResetAlgoritmSteps(false); // Завершить дальнейшие такты
+            }            
 
 
             if (TekSteps=="GetTemperature"){
@@ -921,6 +928,30 @@ int SerialEvents1 (boolean ForceEvents=false){
 
                                   break;
                               } // End Case 2 (Статус подключения)
+
+                              case 8:  // Этап подключения
+                              {  
+
+
+
+                                  if (ReturnOKResult!="OK"){
+                                      GetAlgoritmSteps[2]--;
+                                      ForceToNextStep=2; // Переход к шагу 2 
+
+                                      if (LOG_Rotation < 4){
+                                          PrintAlgoritmSteps();                               
+                                          Serial.print ("RECheck Connection"); Serial.println(";");
+                                      }
+                                  
+                                  }
+
+                                  
+
+
+                                  break;
+                              } // End Case 8 (Этап подключения)
+
+                              
                               case 13:  // AT+HTTPREAD|+HTTPREAD:19|var Therm = "25.0";|OK|
                               {  
                                   tmp_s1="var Therm = \"";
@@ -1257,14 +1288,10 @@ int SerialEvents1 (boolean ForceEvents=false){
 
     void EverySecond(){
         if (millis() >= TimerEverySecond) {
-            TimerEverySecond = millis()+ 1000; 
-    
-            GetDateTime();
-            GetBalance();
-            GetTemperature();
+            TimerEverySecond = millis()+1000; 
 
-            //TimerTemperature
-            //TimerBalance
+// Выполняется каждую секунду
+    
             
             /*
             long rrr=(TimerModemStatus-millis())/1000;
@@ -1296,10 +1323,15 @@ int SerialEvents1 (boolean ForceEvents=false){
     }
 
 
+
+
+
+
     void LifeUpTime(){
-      if (millis() >= blinkLifeUpTime) {
+      if (millis() >= TimerLifeUpTime) {
         D13_Inv;
-        blinkLifeUpTime = millis()+300;
+        TimerLifeUpTime = millis()+IntervalLifeUpTime;
+        //TimerLifeUpTime = millis()+500;
       
    
   
@@ -1328,10 +1360,22 @@ int SerialEvents1 (boolean ForceEvents=false){
 
       }
 
-                    lcd.setCursor(7, 0);
-                    
-                    lcd.print (D6_Read);
-                    lcd.print (" ");
+
+      if (millis() >= TimerModemPower) {
+        TimerModemPower = millis()+IntervalModemPower;
+
+        if (D6_Read==1){
+          ModemPowerON=true;
+        } else {
+          ModemPowerON=false;
+        }
+  
+        lcd.setCursor(7, 0);
+        
+        lcd.print (ModemPowerON);
+        lcd.print (" ");
+      }
+      
     }
 
 
@@ -1382,14 +1426,16 @@ int SerialEvents1 (boolean ForceEvents=false){
 
  
     void loop() {         
-        LifeUpTime ();
-        GetModemStatus();
-        //GetDateTime();
-        //GetBalance();
-        //GetTemperature();
+        LifeUpTime();
         EverySecond();
+        
+        GetModemStatus();
+        GetDateTime();
+        GetBalance();
+        GetTemperature();
+        
         SerialEvents0();
         SerialEvents1();
-        //BeginDHT22();
-          
+        
+        BeginDHT22();
     }
