@@ -36,6 +36,9 @@ DHT dht(DHTPIN, DHTTYPE);
   char buf1=0;
   unsigned long TimerSerial1 = 0;
 
+
+  unsigned long TimerZamer = 0;
+
   float Balance=0.0;
   float LastBalance=0.0;
 
@@ -67,7 +70,7 @@ DHT dht(DHTPIN, DHTTYPE);
 
   
   
-  unsigned long GetAlgoritmSteps[3]={0, 0, 0};
+  unsigned long GetAlgoritmSteps[4]={0, 0, 0, 0};
   int GetBalanceSteps[2]={0, 0};
   int GetDateTimeSteps[2]={0, 0};
 
@@ -96,7 +99,7 @@ DHT dht(DHTPIN, DHTTYPE);
   
   String BufferCommandToSerial1="";
 
-
+  boolean StopAll=false;
   
   
   // Переменные на все случаи жизни
@@ -265,6 +268,17 @@ int SerialEvents0 (){
       CommandExist=false;  
       //Serial1.println("AT+CUSD=1,\"#100#\"");
       GetBalance();
+
+  } else if ((String)command_in == "stop"){
+      CommandExist=false;  
+      StopAll=true;
+      Serial.println("Stop all process!");
+  } else if ((String)command_in == "start"){
+      CommandExist=false;  
+      StopAll=false;      
+      Serial.println("Start all process!");
+
+      
 
   } 
 
@@ -623,9 +637,13 @@ int SerialEvents1 (boolean ForceEvents=false){
 
     // Процедура перехода на следуюющий, конкретный, или вовсе прекраитить все шаги
     void ResetAlgoritmSteps (boolean Continue, int Steps = 0){
-        PrintAlgoritmSteps();
-        Serial.println (input);
-        Serial.println ("###############################");
+        
+        if (TekSteps!="GetModemStatus"){
+            PrintAlgoritmSteps();
+            Serial.println (input);
+            Serial.println ("###############################");
+        }
+
         
         if (Continue==true){
             if (Steps>0){
@@ -640,6 +658,7 @@ int SerialEvents1 (boolean ForceEvents=false){
         }
 
         GetAlgoritmSteps[1]=0;
+        GetAlgoritmSteps[3]=0;
 
         SerialEvents1(true);
         input="";
@@ -727,6 +746,67 @@ int SerialEvents1 (boolean ForceEvents=false){
     }
 
 
+
+    int GetModemStatusParser(){
+        int Return=2;
+        tmp_s1="";
+        tmp_n1=0;
+        tmp_n2=0;
+        tmp_n3=0;
+        
+      
+        tmp_s1="+CPAS:";   // AT+CPAS|+CPAS: 0|OK|
+        tmp_n1=input.indexOf(tmp_s1);
+        tmp_n2=tmp_s1.length();
+    
+        if (tmp_n1>0){
+            tmp_n1+=tmp_n2;
+            
+            tmp_n3=input.indexOf("|", tmp_n1+1);
+            if (tmp_n3>0){
+                tmp_s2=input.substring(tmp_n1,tmp_n3);
+                tmp_s2.trim();  
+    
+                
+                ModemStatus=tmp_s2.toInt();
+                Return=tmp_s2.toInt();
+    
+                //Serial.print ("ModemStatus:");Serial.print (ModemStatus); Serial.println(";");
+    
+                // Информация о состояние модуля
+                // 0 – готов к работе
+                // 2 – неизвестно
+                // 3 – входящий звонок
+                // 4 – голосовое соединение
+    
+                //lcd.setCursor(15,1);
+                //lcd.print (tmp_s2);
+            }
+        }
+
+        return Return;
+    }
+
+
+    void SettingsBeginAlgoritmSerial(){
+      // Общие настройки
+      SerialEvents1(true);
+      input="";
+      
+      MaxGetAlgoritmSteps=20;             // Стандартное ограничение шагов
+      TimeOutGetAlgoritm=millis()+5000;   // Стандарт Timout 5 сек
+      WaintSerialResult1="OK";            // Положительный Ответ №1 по умолчанию (Обезательный)
+      WaintSerialAlternativeResult1="";   // Альтернативный Ответ №1 по умолчанию (работает как ИЛИ)
+      WaintSerialResult2="";              // Положительный Ответ №2 (работает как И к Ответу №1 )
+      WaintSerialResult3="";              // Положительный Ответ №3 (работает как И к Ответу №1 и к Ответу №2 )
+      ForceToNextStep=0;                  // Принудительно Перейти к указанному шагу      
+    }
+
+
+
+
+
+
 // Главный цикл/двигатель общения с модемом
     void BeginAlgoritmSerial(){
 
@@ -761,34 +841,64 @@ int SerialEvents1 (boolean ForceEvents=false){
 
             // Настройки на первом шаге
             if (GetAlgoritmSteps[1]==1){
-
-
+                
+                // Общие настройки
+                SettingsBeginAlgoritmSerial();
+                
+                // Проверка на зацикливание одного Шага
                 if (LastSteps==TekSteps){
                     GetAlgoritmSteps[2]--;
+                } else {
+                    GetAlgoritmSteps[2]=MaxGetAlgoritmSteps;
                 }
-
-
-                // Общие настройки
-                SerialEvents1(true);
-                input="";
-                
-                MaxGetAlgoritmSteps=20;             // Стандартное ограничение шагов
-                TimeOutGetAlgoritm=millis()+5000;   // Стандарт Timout 5 сек
-                WaintSerialResult1="OK";            // Положительный Ответ №1 по умолчанию (Обезательный)
-                WaintSerialAlternativeResult1="";   // Альтернативный Ответ №1 по умолчанию (работает как ИЛИ)
-                WaintSerialResult2="";              // Положительный Ответ №2 (работает как И к Ответу №1 )
-                WaintSerialResult3="";              // Положительный Ответ №3 (работает как И к Ответу №1 и к Ответу №2 )
-                ForceToNextStep=0;                  // Принудительно Перейти к указанному шагу
-
-                GetAlgoritmSteps[2]=MaxGetAlgoritmSteps;
+               
                 LastSteps=TekSteps;
+
+
+                // Проверка статуса модема, через каждый шаг
+                if ((TekSteps!="GetModemStatus") && (GetAlgoritmSteps[3]==0)){
+
+                    //TimerZamer=millis();
+                
+                    WaintSerialResult2="+CPAS:";
+                    Serial1.println("AT+CPAS");    // AT+CPAS|+CPAS: 0|OK|
+
+                    for (; ; )
+                    {
+                        if (GetLetsOK()==true){
+                            ModemStatus=GetModemStatusParser();
+                            if (ModemStatus!=0){
+                                Serial.print ("ModemStatus:");Serial.print (ModemStatus); Serial.println(";");
+                            }
+                            break;
+                        }
+                        
+                        if (millis() >= TimeOutGetAlgoritm) {
+                            break;
+                        }
+                    }
+                    GetAlgoritmSteps[1]=0;
+                    GetAlgoritmSteps[3]=1;
+
+                    // Входящий звонок
+                    if (ModemStatus==3){
+                        Serial1.println("ATA");
+                    }
+
+                    //TimerZamer=millis();
+                    //Serial.print ("ZAMER TIMER MODEM Status:");Serial.print (millis()-TimerZamer); Serial.println(";");
+
+                    
+                }
             }
 
+            // Проверка на зацикливание одного Шага
             if (GetAlgoritmSteps[2]<=0){
                 GetAlgoritmSteps[2]=MaxGetAlgoritmSteps;
                 LastSteps="";                  
                 ResetAlgoritmSteps(false); // Завершить дальнейшие такты
             }            
+
 
 
             if (TekSteps=="GetTemperature"){
@@ -917,6 +1027,9 @@ int SerialEvents1 (boolean ForceEvents=false){
                                               PrintAlgoritmSteps();
                                               Serial.println ("Bad Connection");
                                           }
+
+                                          lcd.setCursor(0, 0);
+                                          lcd.print ("no_IP  ");
                                       } else {
                                           if (LOG_Rotation < 4){
                                               PrintAlgoritmSteps();
@@ -1068,35 +1181,18 @@ int SerialEvents1 (boolean ForceEvents=false){
                         switch(GetAlgoritmSteps[0]){ // Разбор данных, после успешного ответа
                             case 1:  // Статус модема
                             { 
-                                tmp_s1="+CPAS:";   // AT+CPAS|+CPAS: 0|OK|
-                                tmp_n1=input.indexOf(tmp_s1);
-                                tmp_n2=tmp_s1.length();
-        
-                                if (tmp_n1>0){
-                                    tmp_n1+=tmp_n2;
-                                    
-                                    tmp_n3=input.indexOf("|", tmp_n1+1);
-                                    if (tmp_n3>0){
-                                        tmp_s2=input.substring(tmp_n1,tmp_n3);
-                                        tmp_s2.trim();  
-    
-                                        
-                                        ModemStatus=tmp_s2.toInt();
-    
-                                        Serial.print ("ModemStatus:");Serial.print (ModemStatus); Serial.println(";");
-  
-                                        // Информация о состояние модуля
-                                        // 0 – готов к работе
-                                        // 2 – неизвестно
-                                        // 3 – входящий звонок
-                                        // 4 – голосовое соединение
-        
-                                        //lcd.setCursor(15,1);
-                                        //lcd.print (tmp_s2);
-                                    }
-          
-                                }                        
-                                
+                                ModemStatus=GetModemStatusParser();
+
+                                if (ModemStatus!=0){
+                                    Serial.print ("ModemStatus:");Serial.print (ModemStatus); Serial.println(";");
+                                }
+
+                                // Входящий звонок
+                                if (ModemStatus==3){
+                                    Serial1.println("ATA");
+                                  
+                                }                                
+
                                 TimerModemStatus = millis()+IntervalGetModemStatus;
                                 ForceToNextStep=-1; // Завершить дальнейшие такты
                                 
@@ -1364,8 +1460,7 @@ int SerialEvents1 (boolean ForceEvents=false){
                 TekSteps="";
                 Serial.println ("TimeOut!!!");
                 Serial.println ("###############################");                 
-            }  
-
+            }
       }
 
 
@@ -1384,8 +1479,13 @@ int SerialEvents1 (boolean ForceEvents=false){
           GetAlgoritmSteps[1]=0; // Колличество попыток получить ответ, в пределах одного таймаута сбрасывается в 0 при каждом таймауте
           
           if (ModemPowerStatus!=-1){
+              lcd.setCursor(0, 0);
+              lcd.print ("                ");
+              
               lcd.setCursor(0, 1);
               lcd.print ("Modem PowerOff  ");
+
+              
 
               Serial.println("Modem PowerOff;");
           }
@@ -1455,9 +1555,12 @@ int SerialEvents1 (boolean ForceEvents=false){
         EverySecond();
         
         GetModemStatus();
-        GetDateTime();
-        GetBalance();
-        GetTemperature();
+
+        if (StopAll==false){
+            GetDateTime();
+            GetBalance();
+            GetTemperature();
+        }
         
         SerialEvents0();
         SerialEvents1();
