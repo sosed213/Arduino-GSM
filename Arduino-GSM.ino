@@ -43,6 +43,9 @@ DHT dht(DHTPIN, DHTTYPE);
   float LastBalance=0.0;
 
 
+
+
+
 // Таймеры
   unsigned long TimerBalance = 10000;             // Первый, стартовый толчек (отсчет) такта
   unsigned long TimerEverySecond = 1000;
@@ -52,6 +55,8 @@ DHT dht(DHTPIN, DHTTYPE);
   unsigned long TimerLifeUpTime = 0;
   unsigned long TimerDHT22 = 500;
   unsigned long TimerModemPower=0;
+  unsigned long TimerSerialEvents1=0;
+  unsigned long TimerAtExecute=0;
 
 // Интервалы
   unsigned long IntervalGetBalance = 60000;       // Интервал запроса баланса
@@ -61,14 +66,16 @@ DHT dht(DHTPIN, DHTTYPE);
   unsigned long IntervalLifeUpTime=300;           // Интервал жизни Arduino
   unsigned long IntervalDHT22=30000;              // Интервал опроса датчика DHT22
   unsigned long IntervalModemPower=100;
+  unsigned long IntervalSerialEvents1=1500;
   
 // Таймауты
   unsigned long TimeOutGetAlgoritm=0;             // Предельное время выполнения такта
   unsigned long TimeOutGetBalance=0;
   unsigned long TimeOutGetDateTime=0;
   unsigned long TimeOutGetModemStatus=0;
+  unsigned long TimeOutSerialEvents1=0;
 
-  
+
   
   unsigned long GetAlgoritmSteps[4]={0, 0, 0, 0};
   int GetBalanceSteps[2]={0, 0};
@@ -83,6 +90,9 @@ DHT dht(DHTPIN, DHTTYPE);
   String WaintSerialResult3 = "";
 
   String ReturnOKResult = "";
+
+
+  String strSerial1="";
   
   String DateTime = "";
   int ModemStatus = 2;
@@ -92,14 +102,14 @@ DHT dht(DHTPIN, DHTTYPE);
         // 3 – входящий звонок
         // 4 – голосовое соединение
   int ModemPowerStatus = 0;
-  boolean ModemPowerON = false;
+  //boolean ModemPowerON = false;
 
 
                 
   
   String BufferCommandToSerial1="";
 
-  boolean StopAll=false;
+  boolean StopAll=true;
   
   
   // Переменные на все случаи жизни
@@ -164,7 +174,144 @@ void setup() {
   lcd.print ("Hello!!");
 }
 
+    // Подключение к пину Reset GSM-шилда
+    boolean ModemPowerON(){
+        if (D6_Read==1){
+            return true;
+        } else {
+            return false;
+        }
+    }
 
+    // Замена подстроки, всех вхождений
+    void ReplaceString (String &SourceString, String subString1, String subString2){
+        //  & - ссылка
+        //  * - указатель
+        if (SourceString.length()>0){
+            while (SourceString.indexOf(subString1)>=0){
+                SourceString.replace(subString1, subString2);
+            }
+        }
+    }
+
+    // Выполнить AT комманду, и дождаться ответ
+    String AtExecute (String Command="", unsigned long TimeOutAtExecute=1500, boolean OnlyRead = false){
+        if (ModemPowerON()==true){
+
+            //Serial.println("************************");
+            //Serial.print("Execute AT Command: ");Serial.println(Command);
+            //Serial.print("Execute AT TimeOutAtExecute: ");Serial.println(TimeOutAtExecute);
+            //Serial.print("Execute AT OnlyRead: ");Serial.println(OnlyRead,DEC);
+
+
+            
+            if (LOG_Rotation < 4){
+                Serial.println("************************");
+                Serial.print("Execute AT Command: ");Serial.println(Command);
+            }
+
+            if (OnlyRead==false){
+                Serial1.flush();
+                Serial1.println(Command);
+            }
+
+            tmp_s1="";
+            tmp_s2="";
+
+            // Установка таймаута
+            TimerAtExecute = millis()+TimeOutAtExecute;
+            
+            while (TimerAtExecute > millis())
+            {
+                if (LOG_Rotation < 4){
+                  //Serial.print("TimerAtExecute > millis(); ");Serial.print(TimerAtExecute);Serial.print(" > ");Serial.println(millis());
+                }
+                
+                while (Serial1.available() > 0)
+                {
+                    tmp_s1 = Serial1.readStringUntil('\n');
+                    
+                    if (tmp_s1.length()>0){
+                        for(tmp_n1=0;tmp_n1<tmp_s1.length();tmp_n1++){
+                            if ((tmp_s1[tmp_n1]<1) || (tmp_s1[tmp_n1]==13)){
+                              tmp_s1[tmp_n1]='|';
+                            }
+                        }
+                    }
+                    
+                    if (tmp_s1.length()>0){
+                        if (LOG_Rotation < 4){
+                            Serial.print("FULL_BUF: ");Serial.println(tmp_s1);
+                            int tmp_n2=0;
+                            Serial.print("FULL_BUF(2): ");
+                            for(tmp_n1=0;tmp_n1<tmp_s1.length();tmp_n1++){
+                              tmp_n2=tmp_s1[tmp_n1];
+                              Serial.print(tmp_s1[tmp_n1]);Serial.print("(");Serial.print(tmp_n2);Serial.print("), ");
+                            }
+                            Serial.println();
+                        }
+          
+                        tmp_s2 += tmp_s1;
+                        tmp_s2 += "|";
+                        tmp_s1="";
+                    }
+                    
+                    // Сброс таймаута, до тех пор пока поступают данные, или пока не придет OK, или ERROR
+                    TimerAtExecute = millis()+TimeOutAtExecute;
+                }
+
+
+
+                if (tmp_s2.length()>0){
+                    ReplaceString(tmp_s2, "||", "|");
+                    
+                    if ((tmp_s2.indexOf("OK") >= 0) || (tmp_s2.indexOf("ERROR") >= 0)) {
+
+                        if (LOG_Rotation < 4){
+                            Serial.println("OK or ERROR Execute AT Command ");
+                            Serial.println("*#*#*#*#*#*#*#*#*#*#*#*#");
+                        }
+                        
+                        return tmp_s2;
+                        tmp_s2 = "";
+
+                        break;
+
+                    } else if (millis() >= TimerAtExecute) {
+                        if (LOG_Rotation < 4){
+                            Serial.println("TimeOut Execute AT Command");
+                            Serial.println("*#*#*#*#*#*#*#*#*#*#*#*#");
+                        }
+                        
+                        return "(t)" + tmp_s2;
+                        tmp_s2 = "";  
+                        
+
+                        break;
+                        
+                                      
+                    }
+                }
+
+
+
+            } // END TimerAtExecute
+
+
+            
+            if (LOG_Rotation < 4){
+                //Serial.print("TimerAtExecute > millis(); ");Serial.print(TimerAtExecute);Serial.print(" > ");Serial.println(millis());
+                Serial.println("Flush Execute AT Command");
+                Serial.println("*#*#*#*#*#*#*#*#*#*#*#*#");
+            }
+            return "";
+
+
+            
+        } // END - ModemPowerON
+    } // END -Void AtExecute
+
+    
 
 int SerialEvents0 (){
 //если есть данные - читаем
@@ -291,8 +438,9 @@ int SerialEvents0 (){
 
       //if ((EnableSerialEvents1==true) && (TekSteps=="")){
       if (TekSteps==""){
-        
-          Serial1.println(buff_all0);
+          Serial.print("Send Command: "); Serial.print(buff_all0);Serial.println();
+          //Serial1.println(buff_all0);
+          Serial.println(AtExecute(buff_all0));
       } else {
           BufferCommandToSerial1=buff_all0;
       }
@@ -312,7 +460,9 @@ int SerialEvents0 (){
     //if ((EnableSerialEvents1==true) && (TekSteps=="")){
     if (TekSteps==""){
         if (BufferCommandToSerial1.length()>0){
-            Serial1.println(BufferCommandToSerial1);
+            Serial.print("Send Command: "); Serial.print(BufferCommandToSerial1);Serial.println();
+            //Serial1.println(BufferCommandToSerial1);
+            Serial.println(AtExecute(BufferCommandToSerial1));
             BufferCommandToSerial1="";
         }
     }
@@ -404,7 +554,7 @@ void ltrim( char * string, char * trim )
      }
 }
 
-int SerialEvents1 (boolean ForceEvents=false){
+int SerialEvents1_rab (boolean ForceEvents=false){
 
       if ((TekSteps=="") || (ForceEvents==true)){
       //если есть данные - читаем
@@ -569,6 +719,101 @@ int SerialEvents1 (boolean ForceEvents=false){
           }
   }
   }  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        
+
+
+    int SerialEvents1 (boolean ForceEvents=false){
+      if (ModemPowerON()==true){
+          if ((TekSteps=="") || (ForceEvents==true)){
+              strSerial1="";
+              strSerial1 = AtExecute("SerialEvents1",100,true);
+              if (strSerial1.length()>0){
+                  Serial.println("~~~~~Serial1(1)~~~~~");
+                  Serial.print("GSM_buf: ");Serial.println(strSerial1);
+                  Serial.println("********************");
+                  strSerial1 = "";
+              }
+          
+            } 
+        } // END - ModemPowerON
+    } // END - Void SerialEvents1
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -832,7 +1077,7 @@ int SerialEvents1 (boolean ForceEvents=false){
 
 
 
-        if ((ModemPowerON==true) && (GetAlgoritmSteps[0]>0)){
+        if ((ModemPowerON()==true) && (GetAlgoritmSteps[0]>0)){
         //if (TekSteps!=""){
 
             GetAlgoritmSteps[1]++;
@@ -882,7 +1127,10 @@ int SerialEvents1 (boolean ForceEvents=false){
 
                     // Входящий звонок
                     if (ModemStatus==3){
-                        Serial1.println("ATA");
+                        //Serial1.println("ATA");
+                        //String strRING=AtExecute("ATA");
+                        
+                        Serial.println (AtExecute("ATA"));
                     }
 
                     //TimerZamer=millis();
@@ -1189,7 +1437,8 @@ int SerialEvents1 (boolean ForceEvents=false){
 
                                 // Входящий звонок
                                 if (ModemStatus==3){
-                                    Serial1.println("ATA");
+                                    //Serial1.println("ATA");
+                                    Serial.println (AtExecute("ATA"));
                                   
                                 }                                
 
@@ -1347,7 +1596,7 @@ int SerialEvents1 (boolean ForceEvents=false){
     }
 
     void GetDateTime(){
-        if (ModemPowerON==true){
+        if (ModemPowerON()==true){
             if ((TekSteps=="GetDateTime") || (TekSteps=="")){
                 if (millis() >= TimerDateTime) {
                     TekSteps="GetDateTime";
@@ -1362,7 +1611,7 @@ int SerialEvents1 (boolean ForceEvents=false){
     }
 
     void GetModemStatus(){
-        if (ModemPowerON==true){
+        if (ModemPowerON()==true){
             if ((TekSteps=="GetModemStatus") || (TekSteps=="")){
                 if (millis() >= TimerModemStatus) {
                     TekSteps="GetModemStatus";
@@ -1427,6 +1676,9 @@ int SerialEvents1 (boolean ForceEvents=false){
 
 
 
+    
+    
+    
 
 
     void LifeUpTime(){
@@ -1437,7 +1689,7 @@ int SerialEvents1 (boolean ForceEvents=false){
       
    
   
-            if (ModemPowerON==true){
+            if (ModemPowerON()==true){
                 lcd.setCursor(0, 1);
     
                 if (TekSteps==""){
@@ -1467,11 +1719,11 @@ int SerialEvents1 (boolean ForceEvents=false){
       if (millis() >= TimerModemPower) {
         TimerModemPower = millis()+IntervalModemPower;
 
-        if (D6_Read==1){
-          ModemPowerON=true;
+        
+
+        if (ModemPowerON()==true){
           ModemPowerStatus=1;
         } else {
-          ModemPowerON=false;
           ModemStatus = 5;
           TekSteps="";
           //ResetAlgoritmSteps(false); // Завершить дальнейшие такты
@@ -1496,19 +1748,16 @@ int SerialEvents1 (boolean ForceEvents=false){
         }
   
         lcd.setCursor(7, 0);
-        
-        lcd.print (ModemPowerON);
-        lcd.print (" ");
+
+        if (ModemPowerON()==true)
+        {
+            lcd.print ("1 ");
+        } else {
+            lcd.print ("0 ");
+        }
       }
       
     }
-
-
-
-
-
-
-
 
 
 
@@ -1557,6 +1806,7 @@ int SerialEvents1 (boolean ForceEvents=false){
         GetModemStatus();
 
         if (StopAll==false){
+
             GetDateTime();
             GetBalance();
             GetTemperature();
@@ -1565,5 +1815,5 @@ int SerialEvents1 (boolean ForceEvents=false){
         SerialEvents0();
         SerialEvents1();
         
-        BeginDHT22();
+        //BeginDHT22();
     }
