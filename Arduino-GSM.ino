@@ -6,6 +6,13 @@
 #include <LiquidCrystal_I2C.h>
 #include <CyberLib.h>
 
+
+#include <OLED_I2C.h>
+
+OLED  myOLED(SDA, SCL);
+
+extern uint8_t SmallFont[];
+
   // Set the LCD address to 0x27 for a 16 chars and 2 line display
   LiquidCrystal_I2C lcd(0x27, 16, 2); 
 
@@ -52,6 +59,7 @@ DHT dht(DHTPIN, DHTTYPE);
   unsigned long TimerTemperature = 1000;
   unsigned long TimerDateTime = 10000;
   unsigned long TimerModemStatus = 500;
+  unsigned long TimerModemReg = 500;
   unsigned long TimerLifeUpTime = 0;
   unsigned long TimerDHT22 = 500;
   unsigned long TimerModemPower=0;
@@ -63,6 +71,7 @@ DHT dht(DHTPIN, DHTTYPE);
   unsigned long IntervalGetTemperature  = 30000;  // Интервал запроса температуры
   unsigned long IntervalGetDateTime=900;          // Интервал запроса Даты и Время
   unsigned long IntervalGetModemStatus=500;       // Интервал запроса статуса модема
+  unsigned long IntervalGetModemReg=500;       // Интервал запроса статуса модема
   unsigned long IntervalLifeUpTime=300;           // Интервал жизни Arduino
   unsigned long IntervalDHT22=30000;              // Интервал опроса датчика DHT22
   unsigned long IntervalModemPower=100;
@@ -73,6 +82,7 @@ DHT dht(DHTPIN, DHTTYPE);
   unsigned long TimeOutGetBalance=0;
   unsigned long TimeOutGetDateTime=0;
   unsigned long TimeOutGetModemStatus=0;
+  unsigned long TimeOutGetModemReg=0;
   unsigned long TimeOutSerialEvents1=0;
 
 
@@ -96,11 +106,30 @@ DHT dht(DHTPIN, DHTTYPE);
   
   String DateTime = "";
   int ModemStatus = 2;
-        // Информация о состояние модуля
-        // 0 – готов к работе
-        // 2 – неизвестно
-        // 3 – входящий звонок
-        // 4 – голосовое соединение
+        /*
+        * Информация о состояние модуля
+        * 0 – готов к работе
+        * 2 – неизвестно
+        * 3 – входящий звонок
+        * 4 – голосовое соединение
+        */
+  int ModemReg = 2;        
+      /*
+      AT+CREG?  +CREG: 0,1
+      OK  Тип регистрации сети
+      Первый параметр:
+      0 – нет кода регистрации сети
+      1 – есть код регистрации сети
+      2 – есть код регистрации сети + доп параметры
+      Второй параметр:
+      0 – не зарегистрирован, поиска сети нет
+      1 – зарегистрирован, домашняя сеть
+      2 – не зарегистрирован, идёт поиск новой сети
+      3 – регистрация отклонена
+      4 – неизвестно
+      5 – роуминг
+      */
+  
   int ModemPowerStatus = 0;
   //boolean ModemPowerON = false;
 
@@ -153,7 +182,7 @@ DHT dht(DHTPIN, DHTTYPE);
 
 
 
-
+  int LastStroka=-1;
   
  
 void setup() {
@@ -168,11 +197,55 @@ void setup() {
   
   dht.begin();
 
-
   lcd.init(); 
   lcd.backlight();
   lcd.print ("Hello!!");
+
+
+  myOLED.begin();
+  myOLED.setBrightness(207);
+  //myOLED.invert(true);
+  myOLED.setFont(SmallFont);
+  myOLED.clrScr();
+  
 }
+
+
+    void OledPrint (String Text, int Stroka=-1){
+        int x=0;
+        int y=0;
+
+        if (Stroka<0){
+            LastStroka++;
+            if (LastStroka<1){
+                LastStroka=1;
+            }
+
+            if (LastStroka>6){
+                LastStroka=1;
+                delay (500);
+                myOLED.clrScr();
+            }
+            
+            Stroka=LastStroka;
+        }
+
+        y=(Stroka-1)*11;
+
+        int DisplayWidth=21;
+
+        if (Text.length()<DisplayWidth){
+            int PlusProb=(DisplayWidth-Text.length());
+
+            for (int i = 0; i < (PlusProb); i++){
+                Text += " ";
+            }
+        }
+
+        myOLED.print(Text, x, y);
+        myOLED.update();
+    }
+
 
     // Подключение к пину Reset GSM-шилда
     boolean ModemPowerON(){
@@ -1596,45 +1669,163 @@ int SerialEvents1_rab (boolean ForceEvents=false){
     }
 
     void GetDateTime(){
-        if (ModemPowerON()==true){
-            if ((TekSteps=="GetDateTime") || (TekSteps=="")){
-                if (millis() >= TimerDateTime) {
-                    TekSteps="GetDateTime";
-                    TimerDateTime = millis()+IntervalGetDateTime;
+        if ((ModemPowerON()==true) && (TekSteps==""))  {
+            if (millis() >= TimerDateTime) {
+                DateTime="";
+                
+                //String AtExecute (String Command="", unsigned long TimeOutAtExecute=1500, boolean OnlyRead = false){
     
-                    GetAlgoritmSteps[0]=1; // Этапы
-                    GetAlgoritmSteps[1]=0; // Колличество попыток получить ответ, в пределах одного таймаута сбрасывается в 0 при каждом таймауте
+    
+                tmp_s1 = AtExecute("AT+CCLK?");
+                tmp_s2="+CCLK: \"";
+                tmp_s3="\"";
+    
+                if (tmp_s1.length()>0){
+                    tmp_n1=tmp_s1.indexOf(tmp_s2); // AT+CCLK?||||+CCLK: "17/06/22,20:38:51+06"||||OK||
+    
+                    if (tmp_n1>0){
+                        tmp_n1+=tmp_s2.length();
+                        tmp_n3=tmp_s1.indexOf(tmp_s3, tmp_n1+1);
+                        DateTime=tmp_s1.substring(tmp_n1,tmp_n3-3);
+                    }
                 }
+                OledPrint(DateTime,1);
+                TimerDateTime = millis()+IntervalGetDateTime;
             }
         }
-        BeginAlgoritmSerial();
     }
 
-    void GetModemStatus(){
-        if (ModemPowerON()==true){
-            if ((TekSteps=="GetModemStatus") || (TekSteps=="")){
-                if (millis() >= TimerModemStatus) {
-                    TekSteps="GetModemStatus";
-    
-                    // Информация о состояние модуля
-                    // 0 – готов к работе
-                    // 2 – неизвестно
-                    // 3 – входящий звонок
-                    // 4 – голосовое соединение
-                    // 5 - Выключен
-                    
-                    ModemStatus = 2;
-                    
-                    TimerModemStatus = millis()+IntervalGetModemStatus;
-    
-                    GetAlgoritmSteps[0]=1; // Этапы. Запустит конвеер с самого начала.
-                    GetAlgoritmSteps[1]=0; // Колличество попыток получить ответ, в пределах одного таймаута сбрасывается в 0 при каждом таймауте
-                }
-            }
-        }
+
+
+
         
-        BeginAlgoritmSerial();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    int GetModemStatus(boolean force=false){
+
+        // Информация о состояние модуля
+        // 0 – готов к работе
+        // 2 – неизвестно
+        // 3 – входящий звонок
+        // 4 – голосовое соединение
+        // 5 - Выключен
+          
+        if ((millis() >= TimerModemStatus) || (force==true)) {
+            ModemStatus=2;
+            if (ModemPowerON()==true){
+                if ((TekSteps=="") || (force==true)){
+                        tmp_s1=""; tmp_n1=0; tmp_n2=0; tmp_n3=0;
+                        tmp_s1 = AtExecute("AT+CPAS");   //Serial1.println("AT+CPAS");    // AT+CPAS|+CPAS: 0|OK|
+                        tmp_s2="+CPAS:";
+                        tmp_s3="|";
+    
+                        if (tmp_s1.length()>0){
+                            tmp_n1=tmp_s1.indexOf(tmp_s2);
+            
+                            if (tmp_n1>0){
+                                tmp_n1+=tmp_s2.length();
+                                tmp_n3=tmp_s1.indexOf(tmp_s3, tmp_n1+1);
+                                if (tmp_n3>0){
+                                    tmp_s2=tmp_s1.substring(tmp_n1,tmp_n3);
+                                    tmp_s2.trim();
+                                    ModemStatus=tmp_s2.toInt();
+                                }
+                            }
+                        }
+                } else {
+                    ModemStatus=6; // Нельзя сейчас запросить статус
+                }
+            } else {
+                ModemStatus=5;
+            }
+    
+            tmp_s1 = "Status: " + String(ModemStatus, DEC) + " - ";
+            switch(ModemStatus){
+                case 0:
+                {                 
+                    tmp_s1 += "On, Ready";
+                    break;
+                }
+                case 2:  
+                {                 
+                    tmp_s1 += "Unknown";                         
+                    break;
+                }
+                case 3:  
+                {                 
+                    tmp_s1 += "Ring";                         
+                    break;
+                }                
+                case 4:  
+                {                 
+                    tmp_s1 += "Connect";                         
+                    break;
+                }
+                case 5:  
+                {                 
+                    tmp_s1 += "PowerOff";                         
+                    break;
+                }     
+                case 6:  
+                {                 
+                    tmp_s1 += "Busy";                         
+                    break;
+                }                                           
+            }
+
+            
+            OledPrint(tmp_s1,6);
+            return ModemStatus;
+            TimerModemStatus = millis()+IntervalGetModemStatus;
+        }
     }
+
+
+/* Статусы модема
+AT+COPS?  +COPS: 0,0,"MTS-RUS"
+OK  Информация об операторе
+AT+COPS=? +COPS: (2,"MTS RUS","","25001"),(1,"MOTIV","MOTIV","25035"),(1,"Utel","Utel","25039"),,(0,1,4),(0,1,2)
+OK  Доступные операторы
+AT+CPAS +CPAS: 0
+OK  Информация о состояние модуля
+0 – готов к работе
+2 – неизвестно
+3 – входящий звонок
+4 – голосовое соединение
+AT+CREG?  +CREG: 0,1
+OK  Тип регистрации сети
+Первый параметр:
+0 – нет кода регистрации сети
+1 – есть код регистрации сети
+2 – есть код регистрации сети + доп параметры
+Второй параметр:
+0 – не зарегистрирован, поиска сети нет
+1 – зарегистрирован, домашняя сеть
+2 – не зарегистрирован, идёт поиск новой сети
+3 – регистрация отклонена
+4 – неизвестно
+5 – роуминг
+AT+CSQ  +CSQ: 17,0
+OK  Уровень сигнала:
+0 -115 дБл и меньше
+1 -112 дБл
+2-30 -110..-54 дБл
+31 -52 дБл и сильнее
+99 – нет сигнала.
+*/
+
 
 
     void EverySecond(){
@@ -1675,25 +1866,20 @@ int SerialEvents1_rab (boolean ForceEvents=false){
 
 
 
-
-    
-    
-    
-
-
     void LifeUpTime(){
       if (millis() >= TimerLifeUpTime) {
         D13_Inv;
         TimerLifeUpTime = millis()+IntervalLifeUpTime;
-        //TimerLifeUpTime = millis()+500;
-      
    
   
             if (ModemPowerON()==true){
+
+                /*
                 lcd.setCursor(0, 1);
     
                 if (TekSteps==""){
                     lcd.print (DateTime);
+                    //OledPrint(DateTime,1);
                     lcd.print ("                ");
                 } else {
                     lcd.print ("                ");
@@ -1702,20 +1888,18 @@ int SerialEvents1_rab (boolean ForceEvents=false){
                     if (D13_Read==HIGH){
                       lcd.print (TekSteps);
                       lcd.print ("                ");
+                      OledPrint(TekSteps,5);
                     }
                 }
-            }
-
-            
-
-            if (TekSteps=="timeout"){
-                TekSteps="";
-                Serial.println ("TimeOut!!!");
-                Serial.println ("###############################");                 
+                */
+                
+                tmp_s1="";
+                tmp_s1="Step: "+TekSteps;
+                OledPrint(tmp_s1,5);
             }
       }
 
-
+/*
       if (millis() >= TimerModemPower) {
         TimerModemPower = millis()+IntervalModemPower;
 
@@ -1737,6 +1921,8 @@ int SerialEvents1_rab (boolean ForceEvents=false){
               lcd.setCursor(0, 1);
               lcd.print ("Modem PowerOff  ");
 
+              OledPrint("Modem PowerOff",6);
+
               
 
               Serial.println("Modem PowerOff;");
@@ -1746,16 +1932,22 @@ int SerialEvents1_rab (boolean ForceEvents=false){
 
           
         }
-  
+        */
+
+  /*
         lcd.setCursor(7, 0);
 
         if (ModemPowerON()==true)
         {
             lcd.print ("1 ");
+            OledPrint("Modem PowerON",6);
         } else {
             lcd.print ("0 ");
+            OledPrint("Modem PowerOff",6);
         }
-      }
+        */
+        
+      //}
       
     }
 
@@ -1804,10 +1996,9 @@ int SerialEvents1_rab (boolean ForceEvents=false){
         EverySecond();
         
         GetModemStatus();
+        GetDateTime();
 
         if (StopAll==false){
-
-            GetDateTime();
             GetBalance();
             GetTemperature();
         }
